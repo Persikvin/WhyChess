@@ -1,0 +1,39 @@
+{
+  "name": "whychess",
+  "version": "1.0.0",
+  "description": "Firefox-расширение для разбора шахматных партий с объяснениями на русском языке.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "watch": "node scripts/build.js --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run test && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Persikvin/WhyChess.git"
+  },
+  "keywords": [
+    "chess",
+    "firefox",
+    "extension",
+    "stockfish",
+    "analysis"
+  ],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "bugs": {
+    "url": "https://github.com/Persikvin/WhyChess/issues"
+  },
+  "homepage": "https://github.com/Persikvin/WhyChess#readme",
+  "dependencies": {
+    "chess.js": "1.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "jsdom": "30.1.3",
+    "vitest": "5.0.5"
+  }
+}

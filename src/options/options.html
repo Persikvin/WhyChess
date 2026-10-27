@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Настройки WhyChess</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="hero__mark" aria-hidden="true">♞</div>
+        <div class="hero__text">
+          <h1>WhyChess</h1>
+          <p>Разбор шахматных партий с понятными объяснениями на русском языке</p>
+        </div>
+        <span class="hero__version" id="version"></span>
+      </header>
+
+      <form class="card" id="settings-form">
+        <h2>Настройки разбора</h2>
+
+        <div class="field">
+          <div class="field__head">
+            <label for="depth">Глубина расчёта</label>
+            <output class="field__value" id="depth-value" for="depth">10</output>
+          </div>
+          <input id="depth" name="depth" type="range" min="4" max="18" step="1" />
+          <p class="field__hint">
+            Чем выше глубина, тем точнее рекомендации и тем дольше идёт разбор. Значение 10 — хороший
+            баланс для бытового компьютера. На слабом ноутбуке попробуйте 8.
+          </p>
+        </div>
+
+        <div class="field">
+          <div class="field__head">
+            <label for="maxPlies">Сколько полуходов разбирать</label>
+            <output class="field__value" id="max-plies-value" for="maxPlies">80</output>
+          </div>
+          <input id="maxPlies" name="maxPlies" type="number" min="0" max="300" step="2" />
+          <p class="field__hint">
+            Один полуход — это один ход любой стороны. Ограничение экономит время: длинная партия из
+            120 полуходов при лимите 80 будет разобрана до 40-го хода. Значение 0 означает «без
+            ограничения» (не рекомендуется для очень длинных партий).
+          </p>
+        </div>
+
+        <label class="toggle">
+          <input id="autoOpen" name="autoOpen" type="checkbox" />
+          <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb"></span></span>
+          <span class="toggle__text">
+            <span class="toggle__title">Открывать разбор автоматически</span>
+            <span class="toggle__hint">
+              На странице завершённой партии Chess.com или Lichess панель откроется сама и сразу
+              запустит анализ. Партии, которые ещё идут, не затрагиваются.
+            </span>
+          </span>
+        </label>
+
+        <label class="toggle">
+          <input id="showArrow" name="showArrow" type="checkbox" />
+          <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb"></span></span>
+          <span class="toggle__text">
+            <span class="toggle__title">Показывать стрелки на доске</span>
+            <span class="toggle__hint">
+              Кнопка «Показать на доске» переходит к нужной позиции и рисует золотую стрелку лучшего
+              хода и красную стрелку сыгранного хода. Схема в карточке хода работает всегда.
+            </span>
+          </span>
+        </label>
+
+        <div class="actions">
+          <button class="button button--primary" type="submit">Сохранить</button>
+          <button class="button button--ghost" type="button" id="reset">Сбросить</button>
+          <span class="status" id="status" role="status"></span>
+        </div>
+      </form>
+
+      <section class="card">
+        <h2>Как пользоваться</h2>
+        <ol class="steps">
+          <li>Откройте завершённую партию на Chess.com или Lichess.</li>
+          <li>Дождитесь, пока панель WhyChess откроется сама, или нажмите круглую кнопку с конём в правом нижнем углу.</li>
+          <li>Нажмите «Разобрать партию» и дождитесь окончания расчёта.</li>
+          <li>Раскройте карточку хода: там будет лучший ход, вариант движка, оценка и объяснение.</li>
+        </ol>
+        <p class="muted">
+          Если автоматически найти партию не удалось, откройте вкладку «Вставить PGN» и вставьте текст
+          партии вручную. Поддерживаются только обычные шахматы.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Приватность и лицензии</h2>
+        <p class="muted">
+          WhyChess работает полностью локально. Текст партии не отправляется на серверы, а движок
+          Stockfish поставляется вместе с расширением. Расширение не связано с Chess.com и Lichess.
+        </p>
+        <p class="muted">
+          Проект распространяется по лицензии
+          <a href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer">GPL-3.0</a>. В состав входит
+          Stockfish 10 (GPL-3.0,
+          <a href="licenses/STOCKFISH-LICENSE.txt" target="_blank" rel="noreferrer">текст лицензии</a>)
+          и библиотека chess.js (BSD-2-Clause,
+          <a href="licenses/CHESS-JS-LICENSE.txt" target="_blank" rel="noreferrer">текст лицензии</a>).
+        </p>
+      </section>
+
+      <footer class="footer">
+        <span>WhyChess</span>
+        <a href="https://github.com/Persikvin/WhyChess" target="_blank" rel="noreferrer">Исходный код</a>
+      </footer>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
