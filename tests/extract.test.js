@@ -179,6 +179,20 @@ describe('Lichess extraction', () => {
     expect(game.result).toBe('0-1');
   });
 
+  it('ignores the selected-ply hash in the game signature', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 60 } },
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'e4' },
+        { ply: 2, san: 'e5' },
+      ],
+    });
+    const first = extractLichess(doc, locationLike('https://lichess.org/game/abc#1'));
+    const second = extractLichess(doc, locationLike('https://lichess.org/game/abc#12'));
+    expect(first.signature).toBe(second.signature);
+  });
+
   it('rejects unsupported variants', () => {
     const doc = lichessInit({
       game: { variant: { key: 'chess960', name: 'Chess960' } },
@@ -195,6 +209,8 @@ describe('Lichess extraction', () => {
         <move><san>e4</san></move>
         <move><san>e5</san></move>
         <lines><move><san>d4</san></move></lines>
+        <branch><move><san>c4</san></move></branch>
+        <move class="comp"><san>d5</san></move>
         <move><san>Nf3</san></move>
         <move><san>Nc6</san></move>
       </div>
@@ -285,11 +301,14 @@ describe('mainlineMoveElements', () => {
         <move id="m1"><san>e4</san></move>
         <move id="m2"><san>e5</san></move>
         <lines><move id="variation"><san>d4</san></move></lines>
+        <branch><move class="comp" id="branchMove"><san>c4</san></move></branch>
+        <move class="comp" id="compMove"><san>d5</san></move>
         <move id="m3"><san>Nf3</san></move>
+        <move id="m4"><san>Nc6</san></move>
       </div>
     `);
     const nodes = mainlineMoveElements(doc, 'lichess');
-    expect(nodes.map((node) => node.id)).toEqual(['m1', 'm2', 'm3']);
+    expect(nodes.map((node) => node.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
   });
 
   it('sorts Chess.com nodes by ply and ignores nested duplicates', () => {

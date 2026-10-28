@@ -164,7 +164,10 @@ export function shouldAutoOpen(game, locationLike = globalThis.location) {
 export function mainlineMoveElements(doc = document, source = null) {
   if (source === 'lichess') {
     const nodes = Array.from(doc.querySelectorAll('.analyse__moves move, .tview2 move'));
-    return unique(nodes.filter((node) => !node.closest('lines, inline')));
+    // A finished Lichess game renders the server analysis inline: the mainline
+    // is followed by "branch" blocks with alternative moves (`move.comp`).
+    // They share the same <move> tag but must not shift the ply indexes.
+    return unique(nodes.filter((node) => !isLichessVariation(node)));
   }
   if (source !== 'chesscom') return [];
 
@@ -186,6 +189,10 @@ export function mainlineMoveElements(doc = document, source = null) {
 
 function unique(elements) {
   return Array.from(new Set(elements));
+}
+
+function isLichessVariation(node) {
+  return Boolean(node.closest('branch, lines, inline, move.comp')) || node.classList.contains('comp');
 }
 
 
@@ -227,7 +234,9 @@ function finalizeGame(input) {
 function makeSignature(source, url, initialFen, sans) {
   return [
     source,
-    url,
+    // Lichess stores the current board position in the URL hash. Jumping to a
+    // move must not look like a different game to the content script.
+    String(url || '').split('#')[0],
     initialFen,
     sans.length,
     sans[0] || '',
@@ -424,7 +433,7 @@ function readLichessDomSans(doc) {
     if (nodes.length === 0) continue;
     const sans = [];
     for (const node of nodes) {
-      if (node.closest('lines, inline')) continue;
+      if (isLichessVariation(node)) continue;
       const sanNode = node.matches('san') ? node : node.querySelector('san');
       const raw = sanNode?.textContent || node.textContent || '';
       const san = normalizeSan(raw);

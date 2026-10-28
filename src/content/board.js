@@ -59,7 +59,7 @@ export function squareCenter(square, orientation = 'w') {
     : { x: file + 0.5, y: 8.5 - rank };
 }
 
-function arrowGeometry(from, to, orientation) {
+export function arrowGeometry(from, to, orientation) {
   const start = squareCenter(from, orientation);
   const end = squareCenter(to, orientation);
   if (!start || !end) return null;
@@ -70,26 +70,52 @@ function arrowGeometry(from, to, orientation) {
 
   const ux = dx / length;
   const uy = dy / length;
-  const startInset = 0.26;
-  const endInset = 0.34;
-  const x1 = start.x + ux * startInset;
-  const y1 = start.y + uy * startInset;
-  const x2 = end.x - ux * endInset;
-  const y2 = end.y - uy * endInset;
-  const head = 0.36;
-  const wing = 0.19;
-  const baseX = x2 - ux * head;
-  const baseY = y2 - uy * head;
+  // Normal to the arrow direction, used for the shaft and the head wings.
+  const nx = -uy;
+  const ny = ux;
 
-  return {
-    line: { x1, y1, x2, y2 },
-    head: [
-      { x: x2, y: y2 },
-      { x: baseX - uy * wing, y: baseY + ux * wing },
-      { x: baseX + uy * wing, y: baseY - ux * wing },
-    ],
-  };
+  const startInset = Math.min(0.2, length * 0.24);
+  const endInset = Math.min(0.26, length * 0.3);
+  const shaftHalf = 0.072;
+  const headHalf = 0.23;
+  const headLength = Math.min(0.34, length * 0.42);
+
+  const startX = start.x + ux * startInset;
+  const startY = start.y + uy * startInset;
+  const tipX = end.x - ux * endInset;
+  const tipY = end.y - uy * endInset;
+  const baseX = tipX - ux * headLength;
+  const baseY = tipY - uy * headLength;
+
+  const point = (x, y) => `${round(x)},${round(y)}`;
+  const shaftLeft = point(startX + nx * shaftHalf, startY + ny * shaftHalf);
+  const baseLeft = point(baseX + nx * shaftHalf, baseY + ny * shaftHalf);
+  const wingLeft = point(baseX + nx * headHalf, baseY + ny * headHalf);
+  const tip = point(tipX, tipY);
+  const wingRight = point(baseX - nx * headHalf, baseY - ny * headHalf);
+  const baseRight = point(baseX - nx * shaftHalf, baseY - ny * shaftHalf);
+  const shaftRight = point(startX - nx * shaftHalf, startY - ny * shaftHalf);
+
+  // One continuous silhouette: rounded shaft start, straight shaft, and a wide
+  // triangular head. A single outline looks much cleaner than separate line
+  // and triangle shapes stacked on top of each other.
+  return [
+    `M ${shaftLeft}`,
+    `L ${baseLeft}`,
+    `L ${wingLeft}`,
+    `L ${tip}`,
+    `L ${wingRight}`,
+    `L ${baseRight}`,
+    `L ${shaftRight}`,
+    `A ${shaftHalf} ${shaftHalf} 0 0 0 ${shaftLeft}`,
+    'Z',
+  ].join(' ');
 }
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -102,30 +128,16 @@ function svgElement(name, attributes = {}) {
 }
 
 function appendArrow(svg, { from, to, kind = 'best', orientation = 'w' }) {
-  const geometry = arrowGeometry(from, to, orientation);
-  if (!geometry) return;
+  const path = arrowGeometry(from, to, orientation);
+  if (!path) return;
   const group = svgElement('g', { class: `arrow arrow--${kind}` });
-  const outline = svgElement('line', {
-    ...geometry.line,
-    class: 'arrow__outline',
-    'stroke-width': 0.32,
+  const shape = svgElement('path', {
+    d: path,
+    class: 'arrow__shape',
+    'stroke-linejoin': 'round',
     'stroke-linecap': 'round',
   });
-  const shaft = svgElement('line', {
-    ...geometry.line,
-    class: 'arrow__shaft',
-    'stroke-width': 0.18,
-    'stroke-linecap': 'round',
-  });
-  const headOutline = svgElement('polygon', {
-    points: geometry.head.map((point) => `${point.x},${point.y}`).join(' '),
-    class: 'arrow__head-outline',
-  });
-  const head = svgElement('polygon', {
-    points: geometry.head.map((point) => `${point.x},${point.y}`).join(' '),
-    class: 'arrow__head',
-  });
-  group.append(outline, shaft, headOutline, head);
+  group.appendChild(shape);
   svg.appendChild(group);
 }
 

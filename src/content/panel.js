@@ -1,6 +1,7 @@
 import { CLASSIFICATION_META, ERROR_CLASSIFICATIONS, SOURCE_LABELS } from '../shared/constants.js';
 import { formatLoss } from '../shared/chess-utils.js';
 import { createMiniBoard } from './board.js';
+import { clampGeometry, geometryFromRect } from './panel-geometry.js';
 import panelCss from './panel.css';
 
 const CLASS_ORDER = ['best', 'excellent', 'good', 'inaccuracy', 'mistake', 'blunder', 'forced'];
@@ -93,8 +94,15 @@ const PANEL_HTML = `
 
   <footer class="footer">
     <span data-ref="footer-engine">Stockfish · глубина 10</span>
-    <button class="link" type="button" data-action="settings">Настройки</button>
+    <div class="footer__actions">
+      <button class="link" type="button" data-action="reset-layout" title="Вернуть исходные положение и размер">Сбросить окно</button>
+      <button class="link" type="button" data-action="settings">Настройки</button>
+    </div>
   </footer>
+
+  <div class="resizer" data-ref="resizer" role="separator" aria-label="Изменить размер окна" tabindex="0" title="Потяните, чтобы изменить размер">
+    <span class="resizer__grip" aria-hidden="true"></span>
+  </div>
 
   <div class="toast" data-ref="toast" role="status" hidden></div>
 </div>
@@ -124,6 +132,10 @@ export class WhyChessPanel {
     };
     this.cards = new Map();
     this.toastTimer = null;
+    this.geometry = null;
+    this.geometryTimer = null;
+    this.geometryRestored = false;
+    this.layoutReset = false;
     this.build();
   }
 
@@ -153,6 +165,7 @@ export class WhyChessPanel {
     this.shadow.addEventListener('click', (event) => this.handleClick(event));
     this.shadow.addEventListener('keydown', (event) => this.handleKeydown(event));
     this.$pgn.addEventListener('input', () => this.setManualError(null));
+    this.setupLayout();
 
     this.render();
   }
@@ -162,6 +175,147 @@ export class WhyChessPanel {
     if (!parent) return;
     if (!this.launcherHost.isConnected) parent.appendChild(this.launcherHost);
     if (!this.host.isConnected) parent.appendChild(this.host);
+    this.restoreLayout();
+  }
+
+  setupLayout() {
+    this.$header = this.shadow.querySelector('.header');
+    this.$header?.addEventListener('pointerdown', (event) => this.handleDragStart(event));
+    this.$resizer?.addEventListener('pointerdown', (event) => this.handleResizeStart(event));
+    this.$resizer?.addEventListener('keydown', (event) => this.handleResizeKey(event));
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('resize', () => {
+        if (this.geometry) this.applyGeometry(clampGeometry(this.geometry, viewportSize()));
+      });
+    }
+  }
+
+  async restoreLayout() {
+    if (this.geometryRestored) return;
+    this.geometryRestored = true;
+    const stored = await readPanelGeometry();
+    if (this.geometry || this.layoutReset) return;
+    const geometry = stored ? clampGeometry(stored, viewportSize()) : null;
+    if (geometry) this.applyGeometry(geometry);
+  }
+
+  applyGeometry(geometry) {
+    if (!this.host) return;
+    this.geometry = geometry || null;
+    if (!geometry) {
+      this.host.dataset.geometry = 'auto';
+      for (const property of ['left', 'top', 'right', 'width', 'height']) {
+        this.host.style.removeProperty(property);
+      }
+      return;
+    }
+    this.host.dataset.geometry = 'custom';
+    this.host.style.left = `${geometry.x}px`;
+    this.host.style.top = `${geometry.y}px`;
+    this.host.style.right = 'auto';
+    this.host.style.width = `${geometry.width}px`;
+    this.host.style.height = `${geometry.height}px`;
+  }
+
+  resetLayout() {
+    clearTimeout(this.geometryTimer);
+    this.geometryTimer = null;
+    this.layoutReset = true;
+    this.applyGeometry(null);
+    clearPanelGeometry();
+    this.showToast('Положение и размер окна сброшены.', 'info');
+  }
+
+  baseGeometry() {
+    if (this.geometry) return { ...this.geometry };
+    return geometryFromRect(this.host.getBoundingClientRect());
+  }
+
+  handleDragStart(event) {
+    if (event.target.closest?.('button, a, input, textarea, select, [data-action]')) return;
+    this.startPointerSession(event, 'drag');
+  }
+
+  handleResizeStart(event) {
+    this.startPointerSession(event, 'resize');
+  }
+
+  startPointerSession(event, mode) {
+    if (event.button !== undefined && event.button !== 0) return false;
+    const start = this.baseGeometry();
+    if (!start) return false;
+    event.preventDefault();
+    const target = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    try {
+      target.setPointerCapture?.(pointerId);
+    } catch {
+      // Pointer capture is an optimisation; dragging still works without it.
+    }
+    this.host.dataset.interacting = mode;
+
+    const onMove = (moveEvent) => {
+      const next = mode === 'drag'
+        ? {
+            ...start,
+            x: start.x + moveEvent.clientX - startX,
+            y: start.y + moveEvent.clientY - startY,
+          }
+        : {
+            ...start,
+            width: start.width + moveEvent.clientX - startX,
+            height: start.height + moveEvent.clientY - startY,
+          };
+      const clamped = clampGeometry(next, viewportSize());
+      if (clamped) this.applyGeometry(clamped);
+    };
+
+    const finish = () => {
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', finish);
+      target.removeEventListener('pointercancel', finish);
+      target.removeEventListener('lostpointercapture', finish);
+      try {
+        if (target.hasPointerCapture?.(pointerId)) target.releasePointerCapture(pointerId);
+      } catch {
+        // The browser may have released the pointer already.
+      }
+      delete this.host.dataset.interacting;
+      if (this.geometry) this.scheduleGeometrySave();
+    };
+
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', finish);
+    target.addEventListener('pointercancel', finish);
+    target.addEventListener('lostpointercapture', finish);
+    return true;
+  }
+
+  handleResizeKey(event) {
+    const step = event.shiftKey ? 64 : 16;
+    const start = this.baseGeometry();
+    if (!start) return;
+    let next = null;
+    if (event.key === 'ArrowRight') next = { ...start, width: start.width + step };
+    else if (event.key === 'ArrowLeft') next = { ...start, width: start.width - step };
+    else if (event.key === 'ArrowDown') next = { ...start, height: start.height + step };
+    else if (event.key === 'ArrowUp') next = { ...start, height: start.height - step };
+    if (!next) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const clamped = clampGeometry(next, viewportSize());
+    if (clamped) this.applyGeometry(clamped);
+    this.scheduleGeometrySave();
+  }
+
+  scheduleGeometrySave() {
+    clearTimeout(this.geometryTimer);
+    this.geometryTimer = setTimeout(() => {
+      this.geometryTimer = null;
+      if (this.geometry) savePanelGeometry(this.geometry);
+    }, 250);
   }
 
   cacheRefs() {
@@ -197,6 +351,7 @@ export class WhyChessPanel {
     this.$pgn = find('pgn');
     this.$manualError = find('manual-error');
     this.$footerEngine = find('footer-engine');
+    this.$resizer = find('resizer');
     this.$toast = find('toast');
     this.$tabs = Array.from(this.shadow.querySelectorAll('[data-tab]'));
     this.$views = Array.from(this.shadow.querySelectorAll('[data-view]'));
@@ -213,6 +368,10 @@ export class WhyChessPanel {
       }
       if (action === 'settings') {
         this.callbacks.onOpenSettings?.();
+        return;
+      }
+      if (action === 'reset-layout') {
+        this.resetLayout();
         return;
       }
       if (action === 'open-pgn') {
@@ -763,6 +922,52 @@ function applyShadowStyles(root, css) {
     const style = document.createElement('style');
     style.textContent = css;
     root.appendChild(style);
+  }
+}
+
+const PANEL_GEOMETRY_KEY = 'panelGeometry';
+
+function viewportSize() {
+  const doc = globalThis.document;
+  return {
+    width: Number(globalThis.innerWidth) || doc?.documentElement?.clientWidth || 1024,
+    height: Number(globalThis.innerHeight) || doc?.documentElement?.clientHeight || 768,
+  };
+}
+
+function panelStorage() {
+  const api = globalThis.browser ?? globalThis.chrome;
+  return api?.storage?.local ?? null;
+}
+
+async function readPanelGeometry() {
+  const area = panelStorage();
+  if (!area) return null;
+  try {
+    const stored = await area.get(PANEL_GEOMETRY_KEY);
+    return stored?.[PANEL_GEOMETRY_KEY] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function savePanelGeometry(geometry) {
+  const area = panelStorage();
+  if (!area || !geometry) return;
+  try {
+    await area.set({ [PANEL_GEOMETRY_KEY]: geometry });
+  } catch {
+    // The panel keeps working for this page even when storage is unavailable.
+  }
+}
+
+async function clearPanelGeometry() {
+  const area = panelStorage();
+  if (!area) return;
+  try {
+    await area.remove(PANEL_GEOMETRY_KEY);
+  } catch {
+    // Ignore storage errors: the visual reset has already happened.
   }
 }
 

@@ -21,12 +21,8 @@ const OVERLAY_CSS = `
 :host([data-visible="true"]) { opacity: 1; }
 * { box-sizing: border-box; }
 .layer { position: absolute; inset: 0; width: 100%; height: 100%; }
-.arrow__outline { stroke: rgba(8, 12, 20, 0.72); fill: none; }
-.arrow__shaft { stroke: #f2c14e; fill: none; }
-.arrow__head-outline { fill: rgba(8, 12, 20, 0.72); }
-.arrow__head { fill: #f2c14e; }
-.arrow--played .arrow__shaft { stroke: #ef6b6b; }
-.arrow--played .arrow__head { fill: #ef6b6b; }
+.arrow__shape { fill: #f2c14e; stroke: rgba(8, 12, 20, 0.7); stroke-width: 0.05; stroke-linejoin: round; stroke-linecap: round; }
+.arrow--played .arrow__shape { fill: #ef6b6b; }
 .legend {
   position: absolute;
   top: 6px;

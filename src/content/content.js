@@ -22,7 +22,7 @@ let analyzing = false;
 let pageGame = null;
 let activeGame = null;
 let manualMode = false;
-let currentUrl = globalThis.location?.href || '';
+let currentUrl = navigationUrl();
 let lastSource = null;
 let disposed = false;
 let refreshTimer = null;
@@ -387,11 +387,20 @@ async function syncBoardToPly(index, source) {
   return true;
 }
 
+/**
+ * Sends the same sequence a real mouse produces. Lichess move nodes navigate
+ * on pointerdown/pointerup (not click), the round replay listens for mousedown,
+ * and Chess.com handles click. A plain synthetic click is therefore not enough.
+ */
 function clickElement(element) {
   const target = element.querySelector?.('.node-highlight-content') || element;
-  target.dispatchEvent(
-    new MouseEvent('click', { bubbles: true, cancelable: true, view: window }),
-  );
+  const base = { bubbles: true, cancelable: true, view: window, button: 0 };
+  const pointer = { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+  target.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, buttons: 1 }));
+  target.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }));
+  target.dispatchEvent(new PointerEvent('pointerup', { ...pointer, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent('click', base));
 }
 
 function pressArrowLeft() {
@@ -412,9 +421,18 @@ function pressArrowLeft() {
   dispatch(document.body);
 }
 
+/**
+ * Lichess keeps the selected ply in the URL hash. Moving around the board must
+ * not be treated as navigation to another page, otherwise the panel closes and
+ * the analysis is thrown away right after a card click.
+ */
+function navigationUrl() {
+  return String(globalThis.location?.href || '').split('#')[0];
+}
+
 function checkUrl() {
   if (disposed) return;
-  const url = globalThis.location?.href || '';
+  const url = navigationUrl();
   if (url === currentUrl) return;
   currentUrl = url;
   manualMode = false;
