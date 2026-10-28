@@ -1,6 +1,7 @@
 import { CLASSIFICATION_META, ERROR_CLASSIFICATIONS, SOURCE_LABELS } from '../shared/constants.js';
 import { applyUserColor, summarizeAnalysis } from '../shared/analysis.js';
 import { formatLoss } from '../shared/chess-utils.js';
+import { formatSan } from '../shared/notation.js';
 import { createMiniBoard, miniBoardOrientation } from './board.js';
 import { detectSource } from './extract.js';
 import { clampGeometry, geometryFromRect } from './panel-geometry.js';
@@ -852,9 +853,15 @@ export class WhyChessPanel {
     head.setAttribute('aria-controls', `whychess-move-${report.index}`);
 
     const number = span('move-card__number', `${report.moveNumber}${report.color === 'w' ? '.' : '…'}`);
-    const san = span('move-card__san', report.san);
+    const san = span('move-card__san', formatSan(report.san, { capitalize: true }));
     const badge = span(`badge badge--${report.tone || 'good'}`, report.label || '');
+    if (report.lossCp > 0) {
+      badge.title = `Потеря относительно лучшего хода: ${formatLoss(report.lossCp)}.`;
+    }
     const evalText = span(`move-card__eval ${evalTone(report.playedEval?.evalText)}`, report.playedEval?.evalText || '');
+    if (report.playedEval?.evalText) {
+      evalText.title = evaluationTooltip('Оценка после хода', report.playedEval);
+    }
     const chevron = span('move-card__chevron', '›');
     chevron.setAttribute('aria-hidden', 'true');
     head.append(number, san, badge, evalText, chevron);
@@ -884,8 +891,11 @@ export class WhyChessPanel {
       const best = document.createElement('div');
       best.className = 'best-line';
       const label = span('best-line__label', 'Лучший ход');
-      const move = span('best-line__move', report.bestMove.san);
+      const move = span('best-line__move', formatSan(report.bestMove.san, { capitalize: true }));
       const evaluation = span(`best-line__eval ${evalTone(report.bestMove.evalText)}`, report.bestMove.evalText || '');
+      if (report.bestMove.evalText) {
+        evaluation.title = evaluationTooltip('Оценка до хода', report.bestMove);
+      }
       best.append(label, move, evaluation);
       body.appendChild(best);
 
@@ -899,7 +909,7 @@ export class WhyChessPanel {
       if (report.bestMove.pvSan?.length > 1) {
         const pv = document.createElement('div');
         pv.className = 'variant';
-        pv.textContent = `Вариант движка: ${report.bestMove.pvSan.slice(0, 8).join(' ')}`;
+        pv.textContent = `Вариант движка: ${report.bestMove.pvSan.slice(0, 8).map((move) => formatSan(move)).join(' ')}`;
         body.appendChild(pv);
       }
     }
@@ -908,18 +918,23 @@ export class WhyChessPanel {
       const refutation = document.createElement('div');
       refutation.className = 'refutation';
       const line = report.refutation.pvSan?.length > 1
-        ? ` (${report.refutation.pvSan.slice(0, 6).join(' ')})`
+        ? ` (${report.refutation.pvSan.slice(0, 6).map((move) => formatSan(move)).join(' ')})`
         : '';
-      refutation.textContent = `Соперник мог ответить: ${report.refutation.san}${line}`;
+      refutation.textContent = `Соперник мог ответить: ${formatSan(report.refutation.san)}${line}`;
       body.appendChild(refutation);
     }
 
-    if (Array.isArray(report.explanation) && report.explanation.length > 0) {
+    const paragraphs = Array.isArray(report.explanationRich) && report.explanationRich.length > 0
+      ? report.explanationRich
+      : Array.isArray(report.explanation)
+        ? report.explanation.map((text) => [{ text }])
+        : [];
+    if (paragraphs.length > 0) {
       const explanation = document.createElement('div');
       explanation.className = 'explanation';
-      for (const paragraph of report.explanation) {
+      for (const tokens of paragraphs) {
         const p = document.createElement('p');
-        p.textContent = paragraph;
+        for (const token of tokens) p.appendChild(explanationToken(token));
         explanation.appendChild(p);
       }
       body.appendChild(explanation);
@@ -1068,11 +1083,32 @@ async function clearPanelGeometry() {
   }
 }
 
+function explanationToken(token) {
+  const text = String(token?.text ?? '');
+  if (token?.bold) {
+    const strong = document.createElement('strong');
+    strong.textContent = text;
+    return strong;
+  }
+  if (token?.move === 'w' || token?.move === 'b') {
+    const move = document.createElement('span');
+    move.className = `move-token move-token--${token.move}`;
+    move.textContent = text;
+    return move;
+  }
+  return document.createTextNode(text);
+}
+
 function span(className, text) {
   const element = document.createElement('span');
   element.className = className;
   element.textContent = text;
   return element;
+}
+
+function evaluationTooltip(label, evaluation) {
+  const detail = evaluation?.evalSummary ? `; ${evaluation.evalSummary}` : '';
+  return `${label}: ${evaluation?.evalText || '—'}${detail}. Оценка дана с точки зрения белых.`;
 }
 
 function metric(value, label) {

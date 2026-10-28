@@ -84,6 +84,12 @@
   --warn-text: #f2d7a8;
   --refutation-text: #f0c3c3;
   --chip-active-text: #ffe6a8;
+  --move-white-bg: #eef2f8;
+  --move-white-text: #111a2b;
+  --move-white-border: #ffffff;
+  --move-black-bg: #0a101c;
+  --move-black-text: #f2f6fc;
+  --move-black-border: rgba(255, 255, 255, 0.28);
 
   --board-light: #c8d4e6;
   --board-dark: #7e92b1;
@@ -136,6 +142,12 @@
   --warn-text: #8a5a11;
   --refutation-text: #a33232;
   --chip-active-text: #7a5608;
+  --move-white-bg: #ffffff;
+  --move-white-text: #17233a;
+  --move-white-border: rgba(15, 23, 42, 0.24);
+  --move-black-bg: #1b2433;
+  --move-black-text: #f7f9fc;
+  --move-black-border: #0b1220;
 
   --piece-w: #ffffff;
   --piece-b: #1b2433;
@@ -1009,6 +1021,32 @@
 
 .explanation p:last-child {
   margin-bottom: 0;
+}
+
+.explanation strong {
+  color: var(--text);
+  font-weight: 750;
+}
+
+.move-token {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.move-token--w {
+  border: 1px solid var(--move-white-border);
+  background: var(--move-white-bg);
+  color: var(--move-white-text);
+}
+
+.move-token--b {
+  border: 1px solid var(--move-black-border);
+  background: var(--move-black-bg);
+  color: var(--move-black-text);
 }
 
 .card-actions {

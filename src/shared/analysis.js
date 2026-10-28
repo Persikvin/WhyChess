@@ -13,7 +13,7 @@ import {
   uciToSan,
 } from './chess-utils.js';
 import { analyzeMove } from './features.js';
-import { buildExplanation } from './explain.js';
+import { buildExplanationRich } from './explain.js';
 
 export function classifyLoss(lossCp, { playedIsBest = false, forced = false } = {}) {
   if (forced) return 'forced';
@@ -91,12 +91,19 @@ export function buildMoveReport({
   // The content script may learn the player's colour after the analysis has
   // already started (or correct an earlier guess). Keep both wordings so the
   // panel can switch sides without re-running Stockfish.
+  const explanationRichVariants = {
+    user: buildExplanationRich({ ...explanationContext, isUser: true }),
+    opponent: buildExplanationRich({ ...explanationContext, isUser: false }),
+  };
   const explanationVariants = {
-    user: buildExplanation({ ...explanationContext, isUser: true }),
-    opponent: buildExplanation({ ...explanationContext, isUser: false }),
+    user: explanationText(explanationRichVariants.user),
+    opponent: explanationText(explanationRichVariants.opponent),
   };
   const isUser = Boolean(userColor && move.color === userColor);
   const explanation = isUser ? explanationVariants.user : explanationVariants.opponent;
+  const explanationRich = isUser
+    ? explanationRichVariants.user
+    : explanationRichVariants.opponent;
 
   return {
     index,
@@ -120,6 +127,8 @@ export function buildMoveReport({
     lossCp,
     explanation,
     explanationVariants,
+    explanationRich,
+    explanationRichVariants,
     bestMove: bestUci
       ? {
           uci: bestUci,
@@ -162,11 +171,25 @@ export function applyUserColor(report, userColor) {
   if (!report) return report;
   const isUser = Boolean(userColor && report.color === userColor);
   const variants = report.explanationVariants;
+  const richVariants = report.explanationRichVariants;
   const explanation = Array.isArray(variants?.user) && Array.isArray(variants?.opponent)
     ? (isUser ? variants.user : variants.opponent)
     : report.explanation;
-  if (report.isUser === isUser && explanation === report.explanation) return report;
-  return { ...report, isUser, explanation };
+  const explanationRich = Array.isArray(richVariants?.user) && Array.isArray(richVariants?.opponent)
+    ? (isUser ? richVariants.user : richVariants.opponent)
+    : report.explanationRich;
+  if (
+    report.isUser === isUser &&
+    explanation === report.explanation &&
+    explanationRich === report.explanationRich
+  ) {
+    return report;
+  }
+  return { ...report, isUser, explanation, explanationRich };
+}
+
+function explanationText(paragraphs) {
+  return paragraphs.map((tokens) => tokens.map((token) => token.text).join(''));
 }
 
 export function summarizeAnalysis(moves, options = {}) {

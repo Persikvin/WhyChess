@@ -27,7 +27,9 @@ export const CLASSIFICATION_META = Object.freeze({
   forced: { label: 'вынужденный ход', short: 'вынужденный', tone: 'forced' },
 });
 
-export const ERROR_CLASSIFICATIONS = Object.freeze(['inaccuracy', 'mistake', 'blunder']);
+// "Ошибки" объединяет только заметные ухудшения позиции. Неточность
+// остаётся отдельной категорией в разборе, но в этот фильтр не попадает.
+export const ERROR_CLASSIFICATIONS = Object.freeze(['mistake', 'blunder']);
 
 export const PIECE_VALUES = Object.freeze({
   p: 100,

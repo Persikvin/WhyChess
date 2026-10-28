@@ -91,7 +91,7 @@ describe('buildMoveReport', () => {
     });
     expect(report.playedEval.whiteCp).toBe(20);
     expect(report.lossCp).toBe(0);
-    expect(report.explanation[0]).toContain('Вы нашли лучший ход — e4');
+    expect(report.explanation[0]).toContain('Вы нашли лучший ход — пешка e4');
     expect(report.explanation.join(' ')).toContain('Движок на глубине 10');
     expect(report.refutation).toBeNull();
   });
@@ -121,9 +121,9 @@ describe('buildMoveReport', () => {
     expect(report.refutation).toMatchObject({ uci: 'e7e5', san: 'e5' });
     expect(report.refutation.pvSan).toEqual(['e5', 'g4']);
     const text = report.explanation.join(' ');
-    expect(text).toContain('Вы сыграли f3');
+    expect(text).toContain('Вы сыграли ход «пешка f3»');
     expect(text).toContain('Это грубая ошибка');
-    expect(text).toContain('Соперник мог ответить e5');
+    expect(text).toContain('Соперник мог ответить: пешка e5');
     expect(text).not.toMatch(/зевок|зевнул|слил/i);
   });
 
@@ -215,21 +215,26 @@ describe('applyUserColor', () => {
   it('switches the side and the explanation wording in both directions', () => {
     const asWhite = blunderReport('w');
     expect(asWhite.isUser).toBe(true);
-    expect(asWhite.explanation.join(' ')).toContain('Вы сыграли f3');
+    expect(asWhite.explanation.join(' ')).toContain('Вы сыграли ход «пешка f3»');
     expect(asWhite.explanation.join(' ')).toContain('После вашего хода');
+    expect(asWhite.explanationRich).toEqual(asWhite.explanationRichVariants.user);
+    expect(asWhite.explanationRich[0]).toContainEqual({ text: 'Лучший ход', bold: true });
 
     const asBlack = applyUserColor(asWhite, 'b');
     expect(asBlack).not.toBe(asWhite);
     expect(asBlack.isUser).toBe(false);
     expect(asBlack.explanation).toEqual(asWhite.explanationVariants.opponent);
-    expect(asBlack.explanation.join(' ')).toContain('Было сыграно f3');
+    expect(asBlack.explanationRich).toEqual(asWhite.explanationRichVariants.opponent);
+    expect(asBlack.explanationRich).not.toBe(asWhite.explanationRich);
+    expect(asBlack.explanation.join(' ')).toContain('Было сыграно: «пешка f3»');
     expect(asBlack.explanation.join(' ')).toContain('После этого хода');
     expect(asBlack.explanation.join(' ')).not.toContain('Вы сыграли');
 
     const backToWhite = applyUserColor(asBlack, 'w');
     expect(backToWhite.isUser).toBe(true);
     expect(backToWhite.explanation).toEqual(asWhite.explanationVariants.user);
-    expect(backToWhite.explanation.join(' ')).toContain('Вы сыграли f3');
+    expect(backToWhite.explanationRich).toEqual(asWhite.explanationRichVariants.user);
+    expect(backToWhite.explanation.join(' ')).toContain('Вы сыграли ход «пешка f3»');
 
     const unknown = applyUserColor(asWhite, null);
     expect(unknown.isUser).toBe(false);
@@ -283,6 +288,24 @@ describe('summarizeAnalysis', () => {
     expect(summary.avgLoss).toBe(175);
     expect(summary.userAvgLoss).toBe(167);
     expect(summary.hasErrors).toBe(true);
+  });
+
+  it('keeps inaccuracies out of the error count', () => {
+    const summary = summarizeAnalysis(
+      [
+        { classification: 'inaccuracy', lossCp: 80, color: 'w' },
+        { classification: 'mistake', lossCp: 200, color: 'w' },
+        { classification: 'blunder', lossCp: 500, color: 'w' },
+      ],
+      { userColor: 'w', depth: 10 },
+    );
+
+    expect(summary.counts.inaccuracy).toBe(1);
+    expect(summary.userCounts.inaccuracy).toBe(1);
+    expect(summary.errorCount).toBe(2);
+    expect(summary.userErrorCount).toBe(2);
+    expect(summary.avgLoss).toBe(260);
+    expect(summary.userAvgLoss).toBe(260);
   });
 
   it('works without a known user colour', () => {

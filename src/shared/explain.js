@@ -1,10 +1,17 @@
 import {
   CLASSIFICATION_META,
+  MATE_DISPLAY_THRESHOLD,
   PIECE_NAMES,
   PIECE_NAMES_ACCUSATIVE,
   PIECE_NAMES_GENITIVE,
 } from './constants.js';
-import { evaluationSummary, formatEvaluation, formatLoss } from './chess-utils.js';
+import {
+  evaluationSummary,
+  formatEvaluation,
+  formatLoss,
+  scoreToWhite,
+} from './chess-utils.js';
+import { formatSan } from './notation.js';
 
 const PIECE_SUBJECTS = {
   p: 'Пешка',
@@ -16,6 +23,15 @@ const PIECE_SUBJECTS = {
 };
 
 export function buildExplanation(context) {
+  return buildExplanationRich(context).map(paragraphText);
+}
+
+/**
+ * Same explanation as buildExplanation, but split into presentational tokens.
+ * The panel renders labels in bold and move tokens in the colour of the side
+ * that made the move.
+ */
+export function buildExplanationRich(context) {
   const {
     bestFeatures,
     playedFeatures,
@@ -34,19 +50,37 @@ export function buildExplanation(context) {
   } = context;
 
   const paragraphs = [];
+  const bestColor = bestFeatures?.color || turn;
   const bestSan = bestFeatures?.san || context.bestSan || '—';
   const bestName = bestFeatures ? PIECE_NAMES[bestFeatures.piece] : 'фигура';
 
   if (forced) {
     paragraphs.push(
-      `Лучший ход — ${bestSan}. У стороны был только один законный ход, поэтому движок не сравнивал его с альтернативами.`,
+      paragraph(
+        bold('Лучший ход'),
+        ' — ',
+        move(bestSan, bestColor),
+        '. У стороны был только один законный ход, поэтому движок не сравнивал его с альтернативами.',
+      ),
     );
   } else if (isBest) {
     paragraphs.push(
-      isUser ? `Вы нашли лучший ход — ${bestSan}.` : `Лучший ход — ${bestSan}; именно он и был сыгран.`,
+      isUser
+        ? paragraph(
+            bold('Вы нашли лучший ход'),
+            ' — ',
+            move(bestSan, bestColor),
+            '.',
+          )
+        : paragraph(
+            bold('Лучший ход'),
+            ' — ',
+            move(bestSan, bestColor),
+            '; именно он и был сыгран.',
+          ),
     );
   } else {
-    paragraphs.push(`Лучший ход — ${bestSan}.`);
+    paragraphs.push(paragraph(bold('Лучший ход'), ' — ', move(bestSan, bestColor), '.'));
   }
 
   if (bestFeatures) {
@@ -54,30 +88,47 @@ export function buildExplanation(context) {
     const effects = describePositionalEffects(bestFeatures);
     const threat = describeThreats(bestFeatures);
     const firstParagraph = [action, effects, threat].filter(Boolean).join(' ');
-    if (firstParagraph) paragraphs.push(firstParagraph);
+    if (firstParagraph) paragraphs.push(paragraph(firstParagraph));
   }
 
   if (bestScore) {
     const bestEval = formatEvaluation(bestScore, turn);
     const summary = evaluationSummary(bestScore, turn);
     paragraphs.push(
-      `Оценка позиции после рекомендованного продолжения — ${bestEval}; ${summary}.`,
+      paragraph(`Оценка позиции после рекомендованного продолжения — ${bestEval}; ${summary}.`),
     );
   }
 
   if (bestPvSan.length >= 2) {
     paragraphs.push(
-      `Движок на глубине ${depth} рассматривает вариант: ${bestPvSan.slice(0, 8).join(' ')}.`,
+      paragraph(
+        `Движок на глубине ${depth} рассматривает вариант: `,
+        moveSequence(bestPvSan.slice(0, 8), bestColor),
+        '.',
+      ),
     );
   }
 
   if (!isBest && playedFeatures && !forced) {
     const label = CLASSIFICATION_META[classification]?.label || 'неточность';
     const playedDescription = describeMove(playedFeatures);
+    const playedColor = playedFeatures.color || turn;
     paragraphs.push(
       isUser
-        ? `Вы сыграли ${playedFeatures.san}. ${playedDescription}`
-        : `Было сыграно ${playedFeatures.san}. ${playedDescription}`,
+        ? paragraph(
+            bold('Вы сыграли ход'),
+            ' «',
+            move(playedFeatures.san, playedColor),
+            '». ',
+            playedDescription,
+          )
+        : paragraph(
+            bold('Было сыграно'),
+            ': «',
+            move(playedFeatures.san, playedColor),
+            '». ',
+            playedDescription,
+          ),
     );
 
     const lossText = formatLoss(lossCp);
@@ -90,39 +141,122 @@ export function buildExplanation(context) {
             ? 'Это грубая ошибка: последствия для позиции очень серьёзные.'
             : `Это ${label}.`;
     const lossSentence =
-      lossCp > 0
-        ? `По расчёту движка ход уступает лучшему примерно на ${lossText}.`
-        : 'По расчёту движка разница с лучшим ходом минимальна.';
-    paragraphs.push(`${quality} ${lossSentence}`);
+      lossCp >= MATE_DISPLAY_THRESHOLD
+        ? 'По расчёту движка ход ведёт к мату.'
+        : lossCp > 0
+          ? `По расчёту движка ход уступает лучшему примерно на ${lossText}.`
+          : 'По расчёту движка разница с лучшим ходом минимальна.';
+    paragraphs.push(paragraph(`${quality} ${lossSentence}`));
 
     if (afterScore) {
       paragraphs.push(
-        `${isUser ? 'После вашего хода' : 'После этого хода'} оценка — ${formatEvaluation(afterScore, afterTurn)}; ${evaluationSummary(afterScore, afterTurn)}.`,
+        paragraph(
+          `${isUser ? 'После вашего хода' : 'После этого хода'} оценка — ${formatEvaluation(afterScore, afterTurn)}; ${evaluationSummary(afterScore, afterTurn)}.`,
+        ),
       );
+      const note = stillBetterNote({
+        isUser,
+        classification,
+        playedColor,
+        afterScore,
+        afterTurn,
+      });
+      if (note) paragraphs.push(paragraph(note));
     }
 
     if (refutation?.san) {
-      const line = refutation.pvSan?.length > 1 ? ` (${refutation.pvSan.slice(0, 5).join(' ')})` : '';
-      paragraphs.push(`Соперник мог ответить ${refutation.san}${line}.`);
+      const refutationColor = afterTurn || otherColor(playedColor);
+      const lineParts = [];
+      if (refutation.pvSan?.length > 1) {
+        lineParts.push(' (', moveSequence(refutation.pvSan.slice(0, 5), refutationColor), ')');
+      }
+      paragraphs.push(
+        paragraph(
+          'Соперник мог ответить: ',
+          move(refutation.san, refutationColor),
+          ...lineParts,
+          '.',
+        ),
+      );
     }
   } else if (isBest && !forced) {
-    const lossText = lossCp <= 5 ? 'без потери оценки' : `с минимальной потерей ${formatLoss(lossCp)}`;
+    const lossText =
+      lossCp <= 5
+        ? 'без потери оценки'
+        : lossCp >= MATE_DISPLAY_THRESHOLD
+          ? 'но с потерей, ведущей к мату'
+          : `с минимальной потерей ${formatLoss(lossCp)}`;
     paragraphs.push(
-      isUser
-        ? `Выбор совпал с рекомендацией движка, ${lossText}.`
-        : `Сыгранный ход совпал с рекомендацией движка, ${lossText}.`,
+      paragraph(
+        isUser
+          ? `Выбор совпал с рекомендацией движка, ${lossText}.`
+          : `Сыгранный ход совпал с рекомендацией движка, ${lossText}.`,
+      ),
     );
   }
 
   if (context.truncated) {
-    paragraphs.push('Партия разобрана не до конца: достигнут заданный предел числа полуходов.');
+    paragraphs.push(paragraph('Партия разобрана не до конца: достигнут заданный предел числа полуходов.'));
   }
 
   if (paragraphs.length === 1 && bestName) {
-    paragraphs.push('Этот ход движок считает наиболее точным в данной позиции.');
+    paragraphs.push(paragraph('Этот ход движок считает наиболее точным в данной позиции.'));
   }
 
   return paragraphs;
+}
+
+function paragraph(...tokens) {
+  return tokens.flat().map((token) => (typeof token === 'string' ? { text: token } : token));
+}
+
+function paragraphText(tokens) {
+  return tokens.map((token) => token.text).join('');
+}
+
+function bold(text) {
+  return { text, bold: true };
+}
+
+function move(san, color) {
+  return { text: formatSan(san), move: color === 'w' || color === 'b' ? color : null };
+}
+
+function moveSequence(sans, startColor) {
+  const tokens = [];
+  let color = startColor === 'b' ? 'b' : 'w';
+  sans.forEach((san, index) => {
+    if (index > 0) tokens.push(' ');
+    tokens.push(move(san, color));
+    color = otherColor(color);
+  });
+  return tokens;
+}
+
+function otherColor(color) {
+  return color === 'b' ? 'w' : 'b';
+}
+
+/**
+ * A move can lose several pawns of advantage and still leave its author ahead.
+ * Without this remark "грубая ошибка" next to a positive evaluation looks like
+ * a contradiction to a beginner, so state that the position is still better for
+ * the side that played the move.
+ */
+function stillBetterNote({ isUser, classification, playedColor, afterScore, afterTurn }) {
+  if (!isUser || (classification !== 'mistake' && classification !== 'blunder')) return null;
+  const white = scoreToWhite(afterScore, afterTurn);
+  const swing = white.type === 'mate' ? Math.sign(white.value) : Number(white.value) || 0;
+  const betterSide = swing > 0 ? 'w' : 'b';
+  if (betterSide !== playedColor) return null;
+  const pawns = Math.abs(swing) / 100;
+  if (pawns >= 3) {
+    return 'Несмотря на потерю, запас преимущества по-прежнему большой, и позиция остаётся в вашу пользу.';
+  }
+  if (pawns > 0.6) {
+    return 'Несмотря на потерю, позиция всё ещё в вашу пользу.';
+  }
+  return null;
 }
 
 export function describeMove(features) {
@@ -271,7 +405,7 @@ function describeThreats(features) {
 
 export function describePieceShort(features) {
   if (!features) return 'фигура';
-  return `${PIECE_NAMES[features.piece] || 'фигура'} ${features.san}`;
+  return formatSan(features.san, { capitalize: true });
 }
 
 export function pieceGenitive(type) {
