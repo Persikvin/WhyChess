@@ -51,8 +51,8 @@ export function extractChessCom(doc, locationLike) {
   const sans = readChessComSans(doc);
   if (sans.length === 0) return null;
 
-  const userColor = detectChessComOrientation(doc);
   const names = readChessComNames(doc);
+  const userColor = detectChessComUserColor(doc, names);
   const pgn = sanListToPgn(sans, {
     event: 'Партия Chess.com',
     site: locationLike?.href || 'https://www.chess.com',
@@ -87,12 +87,13 @@ export function extractLichess(doc, locationLike) {
     };
   }
 
-  const userColor = normalizeColor(
-    init?.data?.player?.color || detectLichessOrientation(doc) || init?.data?.orientation,
-  );
+  const userColor =
+    detectLichessUserColor(doc, init, locationLike) ||
+    (init ? null : detectLichessOrientation(doc));
   const orientation = normalizeColor(init?.data?.orientation) || userColor || 'w';
-  const treeAttempt = init ? readLichessTreeGame(init, locationLike, orientation) : null;  if (treeAttempt) {
-    const finalized = finalizeGame({ ...treeAttempt, userColor: treeAttempt.userColor || userColor });
+  const treeAttempt = init ? readLichessTreeGame(init, locationLike, userColor) : null;
+  if (treeAttempt) {
+    const finalized = finalizeGame({ ...treeAttempt, userColor });
     if (!finalized.error) return finalized;
   }
 
@@ -346,10 +347,48 @@ function readChessComNames(doc) {
   };
 }
 
+function detectChessComUserColor(doc, names) {
+  const username = readChessComUsername(doc);
+  // A logged-in user is the most reliable source: Chess.com keeps the board
+  // oriented to the viewer, but the user can flip it manually at any moment.
+  // If the account is not one of the two players, this is somebody else's game.
+  if (username) return matchUsernameColor(username, names.white, names.black);
+  return detectChessComOrientation(doc);
+}
+
 function detectChessComOrientation(doc) {
   const board = queryFirst(doc, CHESSCOM_BOARD);
   if (!board) return null;
   return board.classList.contains('flipped') ? 'b' : 'w';
+}
+
+function readChessComUsername(doc) {
+  const profileLink = doc.querySelector('#user-profile-link[href*="/member/"]');
+  const profileMatch = (profileLink?.getAttribute('href') || '').match(/\/member\/([^/?#]+)/);
+  if (profileMatch) return normalizeUsername(decodeURIComponent(profileMatch[1]));
+
+  const selectors = [
+    '#user-profile-link .username',
+    '[data-cy="user-username"]',
+    '.nav-user-button .username',
+    '.nav-user .username',
+    '.header-user .username',
+    '.user-menu .username',
+    '#user-profile-link',
+    '.nav-user-button',
+  ];
+  for (const selector of selectors) {
+    const element = doc.querySelector(selector);
+    if (!element) continue;
+    const attribute =
+      element.getAttribute('data-username') ||
+      element.getAttribute('data-user') ||
+      element.getAttribute('data-cy-user');
+    const value = attribute || element.textContent;
+    const username = normalizeUsername(value);
+    if (username) return username;
+  }
+  return null;
 }
 
 function readLichessPageInit(doc) {
@@ -367,7 +406,7 @@ function readLichessPageInit(doc) {
   }
 }
 
-function readLichessTreeGame(init, locationLike, fallbackUserColor) {
+function readLichessTreeGame(init, locationLike, userColor) {
   const parts = Array.isArray(init.data?.treeParts) ? init.data.treeParts : [];
   if (parts.length < 2) return null;
   const sorted = [...parts].sort((a, b) => (a.ply || 0) - (b.ply || 0));
@@ -380,7 +419,6 @@ function readLichessTreeGame(init, locationLike, fallbackUserColor) {
   const data = init.data;
   const playerName = data.player?.user?.username || data.player?.name;
   const opponentName = data.opponent?.user?.username || data.opponent?.name;
-  const playerColor = normalizeColor(data.player?.color) || fallbackUserColor;
   const white =
     data.player?.color === 'white'
       ? playerName
@@ -410,7 +448,7 @@ function readLichessTreeGame(init, locationLike, fallbackUserColor) {
     source: 'lichess',
     pgn,
     url: locationLike?.href || '',
-    userColor: playerColor,
+    userColor,
     white: white || 'Белые',
     black: black || 'Чёрные',
     result,
@@ -448,6 +486,79 @@ function detectLichessOrientation(doc) {
   const wrap = doc.querySelector('.cg-wrap');
   if (wrap) return wrap.classList.contains('orientation-black') ? 'b' : 'w';
   return null;
+}
+
+function detectLichessUserColor(doc, init, locationLike) {
+  const data = init?.data;
+  if (!data) return null;
+  const names = lichessPlayerNames(data);
+  const username = readLichessUsername(doc);
+  const byName = matchUsernameColor(username, names.white, names.black);
+  if (byName) return byName;
+
+  if (data.userAnalysis === true) {
+    // The analysis board starts as a synthetic game, so `player.color` only
+    // repeats the board orientation. When Lichess opens a game for analysis it
+    // puts the side of the person who opened it in the URL: /analysis/<id>/<color>.
+    return username ? lichessAnalysisColor(locationLike) : null;
+  }
+
+  // A spectator gets the game JSON with `spectator: true`, and `player.color`
+  // is the board orientation, not a side that belongs to the visitor.
+  if (data.spectator === true) return null;
+  return normalizeColor(data.player?.color);
+}
+
+function lichessAnalysisColor(locationLike) {
+  const match = String(locationLike?.pathname || '').match(
+    /\/analysis\/[^/]+\/(white|black)\/?$/,
+  );
+  return match ? normalizeColor(match[1]) : null;
+}
+
+function lichessPlayerNames(data) {
+  const playerName = usernameOf(data?.player);
+  const opponentName = usernameOf(data?.opponent);
+  if (data?.player?.color === 'white') return { white: playerName, black: opponentName };
+  if (data?.player?.color === 'black') return { white: opponentName, black: playerName };
+  return { white: null, black: null };
+}
+
+function usernameOf(player) {
+  return player?.user?.username || player?.user?.name || player?.name || player?.username || null;
+}
+
+function readLichessUsername(doc) {
+  const bodyUser = doc.body?.getAttribute('data-user') || doc.documentElement?.getAttribute('data-user');
+  if (bodyUser) return normalizeUsername(bodyUser);
+
+  for (const selector of ['#top .site-buttons .username', '#top .dasher .username', '#top a.username']) {
+    const element = doc.querySelector(selector);
+    const username = normalizeUsername(element?.textContent);
+    if (username) return username;
+  }
+
+  const profileLink = doc.querySelector('#top a[href^="/@/"]');
+  const href = profileLink?.getAttribute('href') || '';
+  const match = href.match(/^\/@\/([^/?#]+)/);
+  return match ? normalizeUsername(decodeURIComponent(match[1])) : null;
+}
+
+function matchUsernameColor(username, white, black) {
+  const user = normalizeUsername(username);
+  const whiteName = normalizeUsername(white);
+  const blackName = normalizeUsername(black);
+  if (!user) return null;
+  if (whiteName === user && blackName !== user) return 'w';
+  if (blackName === user && whiteName !== user) return 'b';
+  return null;
+}
+
+function normalizeUsername(value) {
+  return String(value || '')
+    .replace(/^@/, '')
+    .trim()
+    .toLowerCase();
 }
 
 function normalizeColor(value) {

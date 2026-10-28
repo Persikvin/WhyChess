@@ -1,7 +1,10 @@
 import { CLASSIFICATION_META, ERROR_CLASSIFICATIONS, SOURCE_LABELS } from '../shared/constants.js';
+import { applyUserColor, summarizeAnalysis } from '../shared/analysis.js';
 import { formatLoss } from '../shared/chess-utils.js';
-import { createMiniBoard } from './board.js';
+import { createMiniBoard, miniBoardOrientation } from './board.js';
+import { detectSource } from './extract.js';
 import { clampGeometry, geometryFromRect } from './panel-geometry.js';
+import { detectSiteTheme, watchSiteTheme } from './theme.js';
 import panelCss from './panel.css';
 
 const CLASS_ORDER = ['best', 'excellent', 'good', 'inaccuracy', 'mistake', 'blunder', 'forced'];
@@ -136,6 +139,7 @@ export class WhyChessPanel {
     this.geometryTimer = null;
     this.geometryRestored = false;
     this.layoutReset = false;
+    this.themeCleanup = null;
     this.build();
   }
 
@@ -166,6 +170,7 @@ export class WhyChessPanel {
     this.shadow.addEventListener('keydown', (event) => this.handleKeydown(event));
     this.$pgn.addEventListener('input', () => this.setManualError(null));
     this.setupLayout();
+    this.setupTheme();
 
     this.render();
   }
@@ -187,6 +192,34 @@ export class WhyChessPanel {
       globalThis.addEventListener('resize', () => {
         if (this.geometry) this.applyGeometry(clampGeometry(this.geometry, viewportSize()));
       });
+    }
+  }
+
+  /**
+   * Mirrors the host page palette onto both shadow hosts. The stylesheet does
+   * the actual work through [data-theme] and [data-site] tokens.
+   */
+  setupTheme() {
+    const apply = () => {
+      const theme = detectSiteTheme(globalThis.document, globalThis);
+      for (const host of [this.host, this.launcherHost]) {
+        if (host) host.dataset.theme = theme;
+      }
+      this.setSite(detectSource(globalThis.location));
+    };
+    this.themeCleanup?.();
+    this.themeCleanup = watchSiteTheme(apply, {
+      doc: globalThis.document,
+      win: globalThis,
+    });
+  }
+
+  setSite(site) {
+    this.site = site || null;
+    for (const host of [this.host, this.launcherHost]) {
+      if (!host) continue;
+      if (this.site) host.dataset.site = this.site;
+      else delete host.dataset.site;
     }
   }
 
@@ -467,6 +500,11 @@ export class WhyChessPanel {
     return this.state.open;
   }
 
+  /** Colour currently applied to the review (the side the user played). */
+  getGameUserColor() {
+    return this.state.game?.userColor || null;
+  }
+
   setTab(tab, { focus = false } = {}) {
     if (tab !== 'review' && tab !== 'pgn') return;
     this.state.tab = tab;
@@ -512,6 +550,48 @@ export class WhyChessPanel {
     this.render();
     if (this.state.open && !game) this.setTab('pgn', { focus: false });
     if (this.state.open && game) this.setTab('review', { focus: false });
+  }
+
+  /**
+   * The site can reveal the logged-in player a little later than the game
+   * itself. Re-colour the ready cards in place instead of throwing the whole
+   * review away, so "Мои ходы" never keeps the opponent's side.
+   */
+  setGameUserColor(userColor) {
+    const game = this.state.game;
+    const color = userColor || null;
+    if (!game || (game.userColor || null) === color) return;
+    this.state.game = { ...game, userColor: color };
+
+    const recolor = (report) => applyUserColor(report, color);
+
+    this.state.moves = this.state.moves.map(recolor);
+    for (const entry of this.cards.values()) {
+      const report = recolor(entry.report);
+      if (report === entry.report) continue;
+      entry.report = report;
+      entry.card.classList.toggle('is-user', report.isUser);
+      // The explanation wording ("Вы сыграли…" / "Было сыграно…") depends on
+      // the side, so an already expanded card has to be rebuilt in place.
+      if (entry.filled) this.fillCard(entry);
+    }
+
+    if (this.state.analysis?.summary) {
+      const previous = this.state.analysis.summary;
+      this.state.analysis = {
+        ...this.state.analysis,
+        summary: summarizeAnalysis(this.state.moves, {
+          userColor: color,
+          totalMoves: previous.totalMoves,
+          truncated: previous.truncated,
+          depth: previous.depth,
+        }),
+      };
+    }
+
+    this.updateCounts();
+    this.applyFilter();
+    if (this.state.analysis) this.renderSummary(this.state.analysis);
   }
 
   render() {
@@ -625,24 +705,37 @@ export class WhyChessPanel {
   }
 
   addMove(report) {
-    this.state.moves.push(report);
+    const move = applyUserColor(report, this.state.game?.userColor || null);
+    this.state.moves.push(move);
     this.state.status = 'analyzing';
-    this.appendCard(report);
+    this.appendCard(move);
     this.updateCounts();
   }
 
   setAnalysis(analysis) {
-    this.state.analysis = analysis;
+    const userColor = this.state.game?.userColor || null;
+    const moves = (analysis.moves || []).map((move) => applyUserColor(move, userColor));
+    const summary = analysis.summary
+      ? summarizeAnalysis(moves, {
+          userColor,
+          totalMoves: analysis.summary.totalMoves,
+          truncated: analysis.summary.truncated,
+          depth: analysis.summary.depth,
+        })
+      : analysis.summary;
+    const normalized = { ...analysis, moves, summary };
+
+    this.state.analysis = normalized;
     this.state.status = 'complete';
-    this.state.moves = [...(analysis.moves || [])];
+    this.state.moves = moves;
     const expanded = new Set(this.state.expanded);
     this.state.expanded = new Set();
     this.cards.clear();
     this.$moves.replaceChildren();
-    for (const move of this.state.moves) this.appendCard(move, { expanded: expanded.has(move.index) });
+    for (const move of moves) this.appendCard(move, { expanded: expanded.has(move.index) });
 
     if (![...this.state.expanded].length) {
-      const firstError = this.state.moves.find((move) => ERROR_CLASSIFICATIONS.includes(move.classification));
+      const firstError = moves.find((move) => ERROR_CLASSIFICATIONS.includes(move.classification));
       if (firstError) this.toggleCard(firstError.index, { silent: true });
     }
 
@@ -653,8 +746,8 @@ export class WhyChessPanel {
     this.$analyze.textContent = 'Разобрать заново';
     this.$cancel.hidden = true;
     this.$summary.hidden = false;
-    this.$filters.hidden = this.state.moves.length === 0;
-    this.renderSummary(analysis);
+    this.$filters.hidden = moves.length === 0;
+    this.renderSummary(normalized);
     this.updateCounts();
     this.applyFilter();
     if (analysis.game) {
@@ -833,7 +926,11 @@ export class WhyChessPanel {
     }
 
     if (report.fenBefore) {
-      body.appendChild(createMiniBoard(report, { orientation: report.color }));
+      body.appendChild(
+        createMiniBoard(report, {
+          orientation: miniBoardOrientation(report, this.state.game?.userColor),
+        }),
+      );
     }
 
     if (this.callbacks.onShowOnBoard && !this.state.manual && report.bestMove?.san && report.index >= 0) {

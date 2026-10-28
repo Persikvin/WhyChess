@@ -122,6 +122,49 @@ describe('Chess.com extraction', () => {
     );
     expect(game.ongoing).toBe(true);
   });
+
+  it('prefers the logged-in username over the board orientation', () => {
+    const doc = documentFrom(`
+      <wc-simple-move-list>
+        <div data-node="0-1"><span class="node-highlight-content">e4</span></div>
+        <div data-node="0-2"><span class="node-highlight-content">e5</span></div>
+      </wc-simple-move-list>
+      <wc-chess-board></wc-chess-board>
+      <div class="player color-white"><span class="username">Alice</span></div>
+      <div class="player color-black"><span class="username">Bob</span></div>
+      <a id="user-profile-link" href="/member/Bob"><span class="username">Bob</span></a>
+    `);
+    const game = extractChessCom(doc, location);
+    expect(game.userColor).toBe('b');
+  });
+
+  it('still trusts the header when the board is flipped manually', () => {
+    const doc = documentFrom(`
+      <wc-simple-move-list>
+        <div data-node="0-1"><span class="node-highlight-content">e4</span></div>
+      </wc-simple-move-list>
+      <wc-chess-board class="flipped"></wc-chess-board>
+      <div class="player color-white"><span class="username">Alice</span></div>
+      <div class="player color-black"><span class="username">Bob</span></div>
+      <a id="user-profile-link" href="/member/Alice"></a>
+    `);
+    const game = extractChessCom(doc, location);
+    expect(game.userColor).toBe('w');
+  });
+
+  it('does not claim a side when the account is not in the game', () => {
+    const doc = documentFrom(`
+      <wc-simple-move-list>
+        <div data-node="0-1"><span class="node-highlight-content">e4</span></div>
+      </wc-simple-move-list>
+      <wc-chess-board></wc-chess-board>
+      <div class="player color-white"><span class="username">Alice</span></div>
+      <div class="player color-black"><span class="username">Bob</span></div>
+      <a id="user-profile-link" href="/member/Carol"></a>
+    `);
+    const game = extractChessCom(doc, location);
+    expect(game.userColor).toBeNull();
+  });
 });
 
 describe('Lichess extraction', () => {
@@ -177,6 +220,114 @@ describe('Lichess extraction', () => {
     expect(game.white).toBe('Alice');
     expect(game.black).toBe('Bob');
     expect(game.result).toBe('0-1');
+  });
+
+  it('does not claim a side for a spectator', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 60 } },
+      player: { color: 'white', user: { username: 'Alice' } },
+      opponent: { color: 'black', user: { username: 'Bob' } },
+      spectator: true,
+      orientation: 'white',
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'e4' },
+        { ply: 2, san: 'e5' },
+      ],
+    });
+
+    const game = extractLichess(doc, location);
+    expect(game.white).toBe('Alice');
+    expect(game.black).toBe('Bob');
+    expect(game.userColor).toBeNull();
+  });
+
+  it('finds the user side by username when the page is marked as spectator', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 60 } },
+      player: { color: 'white', user: { username: 'Alice' } },
+      opponent: { color: 'black', user: { username: 'Bob' } },
+      spectator: true,
+      orientation: 'white',
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'e4' },
+      ],
+    });
+    doc.body.insertAdjacentHTML(
+      'beforeend',
+      '<header id="top"><div class="site-buttons"><span class="username">Bob</span></div></header>',
+    );
+
+    const game = extractLichess(doc, location);
+    expect(game.userColor).toBe('b');
+  });
+
+  it('does not invent a user side on the scratch analysis board', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 10 } },
+      player: { color: 'white' },
+      opponent: { color: 'black' },
+      userAnalysis: true,
+      orientation: 'white',
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'd4' },
+      ],
+    });
+
+    const game = extractLichess(doc, location);
+    expect(game.userColor).toBeNull();
+  });
+
+  it('takes the side from the analysis URL for a logged-in user', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 10 } },
+      player: { color: 'white' },
+      opponent: { color: 'black' },
+      userAnalysis: true,
+      orientation: 'white',
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'd4' },
+      ],
+    });
+    doc.body.insertAdjacentHTML(
+      'beforeend',
+      '<header id="top"><div class="site-buttons"><span class="username">Bob</span></div></header>',
+    );
+
+    const asBlack = extractLichess(
+      doc,
+      locationLike('https://lichess.org/analysis/abcd1234/black'),
+    );
+    expect(asBlack.userColor).toBe('b');
+
+    const asWhite = extractLichess(
+      doc,
+      locationLike('https://lichess.org/analysis/abcd1234/white'),
+    );
+    expect(asWhite.userColor).toBe('w');
+  });
+
+  it('keeps the analysis side unknown for a logged-out visitor', () => {
+    const doc = lichessInit({
+      game: { variant: { key: 'standard' }, status: { id: 10 } },
+      player: { color: 'white' },
+      opponent: { color: 'black' },
+      userAnalysis: true,
+      orientation: 'white',
+      treeParts: [
+        { ply: 0, fen: START_FEN },
+        { ply: 1, san: 'd4' },
+      ],
+    });
+
+    const game = extractLichess(
+      doc,
+      locationLike('https://lichess.org/analysis/abcd1234/black'),
+    );
+    expect(game.userColor).toBeNull();
   });
 
   it('ignores the selected-ply hash in the game signature', () => {

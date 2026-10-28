@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyUserColor,
   buildMoveReport,
   classifyLoss,
   fenTurn,
@@ -186,6 +187,65 @@ describe('buildMoveReport', () => {
     expect(report.explanation).toContain(
       'Партия разобрана не до конца: достигнут заданный предел числа полуходов.',
     );
+  });
+});
+
+describe('applyUserColor', () => {
+  const plan = planFrom(['f3', 'e5']);
+
+  function blunderReport(userColor) {
+    return buildMoveReport({
+      index: 0,
+      move: plan.moves[0],
+      beforeResult: engineResult({
+        bestMove: 'e2e4',
+        score: { type: 'cp', value: 20 },
+        pv: ['e2e4', 'e7e5'],
+      }),
+      afterResult: engineResult({
+        bestMove: 'e7e5',
+        score: { type: 'cp', value: 400 },
+        pv: ['e7e5', 'g2g4'],
+      }),
+      depth: 10,
+      userColor,
+    });
+  }
+
+  it('switches the side and the explanation wording in both directions', () => {
+    const asWhite = blunderReport('w');
+    expect(asWhite.isUser).toBe(true);
+    expect(asWhite.explanation.join(' ')).toContain('Вы сыграли f3');
+    expect(asWhite.explanation.join(' ')).toContain('После вашего хода');
+
+    const asBlack = applyUserColor(asWhite, 'b');
+    expect(asBlack).not.toBe(asWhite);
+    expect(asBlack.isUser).toBe(false);
+    expect(asBlack.explanation).toEqual(asWhite.explanationVariants.opponent);
+    expect(asBlack.explanation.join(' ')).toContain('Было сыграно f3');
+    expect(asBlack.explanation.join(' ')).toContain('После этого хода');
+    expect(asBlack.explanation.join(' ')).not.toContain('Вы сыграли');
+
+    const backToWhite = applyUserColor(asBlack, 'w');
+    expect(backToWhite.isUser).toBe(true);
+    expect(backToWhite.explanation).toEqual(asWhite.explanationVariants.user);
+    expect(backToWhite.explanation.join(' ')).toContain('Вы сыграли f3');
+
+    const unknown = applyUserColor(asWhite, null);
+    expect(unknown.isUser).toBe(false);
+    expect(unknown.explanation).toEqual(asWhite.explanationVariants.opponent);
+  });
+
+  it('returns the same report when the side already matches', () => {
+    const report = blunderReport('w');
+    expect(applyUserColor(report, 'w')).toBe(report);
+    expect(applyUserColor(report, 'b')).not.toBe(report);
+  });
+
+  it('keeps working with reports that carry no explanation variants', () => {
+    const legacy = { color: 'b', isUser: false, explanation: ['Было сыграно e5.'] };
+    const updated = applyUserColor(legacy, 'b');
+    expect(updated).toEqual({ color: 'b', isUser: true, explanation: ['Было сыграно e5.'] });
   });
 });
 

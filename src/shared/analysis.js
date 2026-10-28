@@ -71,12 +71,11 @@ export function buildMoveReport({
         }
       : null;
 
-  const explanation = buildExplanation({
+  const explanationContext = {
     bestFeatures,
     playedFeatures,
     forced,
     isBest: playedIsBest,
-    isUser: Boolean(userColor && move.color === userColor),
     classification,
     lossCp,
     bestScore: beforeResult.score,
@@ -88,7 +87,16 @@ export function buildMoveReport({
     depth,
     truncated,
     bestSan,
-  });
+  };
+  // The content script may learn the player's colour after the analysis has
+  // already started (or correct an earlier guess). Keep both wordings so the
+  // panel can switch sides without re-running Stockfish.
+  const explanationVariants = {
+    user: buildExplanation({ ...explanationContext, isUser: true }),
+    opponent: buildExplanation({ ...explanationContext, isUser: false }),
+  };
+  const isUser = Boolean(userColor && move.color === userColor);
+  const explanation = isUser ? explanationVariants.user : explanationVariants.opponent;
 
   return {
     index,
@@ -105,12 +113,13 @@ export function buildMoveReport({
     promotion: move.promotion || null,
     fenBefore,
     fenAfter,
-    isUser: Boolean(userColor && move.color === userColor),
+    isUser,
     classification,
     label: CLASSIFICATION_META[classification]?.label || '',
     tone: CLASSIFICATION_META[classification]?.tone || 'good',
     lossCp,
     explanation,
+    explanationVariants,
     bestMove: bestUci
       ? {
           uci: bestUci,
@@ -142,6 +151,22 @@ export function buildMoveReport({
     },
     refutation,
   };
+}
+
+/**
+ * Aligns a ready move report with the player's colour known by the panel.
+ * Reports carry both explanation wordings, so this is a pure relabelling that
+ * never needs another engine run. Returns the same object when nothing changed.
+ */
+export function applyUserColor(report, userColor) {
+  if (!report) return report;
+  const isUser = Boolean(userColor && report.color === userColor);
+  const variants = report.explanationVariants;
+  const explanation = Array.isArray(variants?.user) && Array.isArray(variants?.opponent)
+    ? (isUser ? variants.user : variants.opponent)
+    : report.explanation;
+  if (report.isUser === isUser && explanation === report.explanation) return report;
+  return { ...report, isUser, explanation };
 }
 
 export function summarizeAnalysis(moves, options = {}) {

@@ -117,6 +117,25 @@ function round(value) {
 }
 
 
+/**
+ * A saved FEN always lists ranks from 8 down to 1. Rotating the board for black
+ * means walking the same cells in reverse, so files also run from h to a.
+ */
+export function orientBoardCells(cells = [], orientation = 'w') {
+  return orientation === 'b' ? [...cells].reverse() : cells;
+}
+
+/**
+ * Every diagram in the panel keeps the same point of view: the side the
+ * reviewer played. Opponent moves still get their own arrows and explanation,
+ * but the board never flips under the reader. When the side is unknown (for
+ * example in a pasted PGN) the mover's side is the only sensible fallback.
+ */
+export function miniBoardOrientation(report, userColor) {
+  if (userColor === 'w' || userColor === 'b') return userColor;
+  return report?.color === 'b' ? 'b' : 'w';
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function svgElement(name, attributes = {}) {
@@ -167,7 +186,7 @@ export function createMiniBoard(report, options = {}) {
   const grid = document.createElement('div');
   grid.className = 'mini__grid';
 
-  for (const cell of parseFenBoard(report.fenBefore)) {
+  for (const cell of orientBoardCells(parseFenBoard(report.fenBefore), orientation)) {
     const square = document.createElement('div');
     square.className = `mini__square ${cell.light ? 'is-light' : 'is-dark'}`;
     if (cell.square === report.from || cell.square === report.to) {

@@ -97,6 +97,7 @@ function refreshGame({ force = false } = {}) {
   if (source !== lastSource) {
     lastSource = source;
     overlay.setSource(source);
+    panel?.setSite(source);
   }
 
   const next = extractGame(document, globalThis.location);
@@ -115,6 +116,16 @@ function refreshGame({ force = false } = {}) {
   }
 
   if (!force && pageGame?.signature === next.signature) {
+    pageGame = next;
+    const nextColor = next.userColor || null;
+    const panelColor = panel?.getGameUserColor?.() ?? null;
+    // The site may reveal or correct the player's side while a review is
+    // already showing. Keep the panel aligned even if the colour arrived
+    // together with a signature change during an analysis run.
+    if (!manualMode && !analyzing && panelColor !== nextColor) {
+      activeGame = next;
+      panel?.setGameUserColor?.(nextColor);
+    }
     if (manualMode) panel.setPageGameAvailable(Boolean(pageGame));
     return;
   }
@@ -139,6 +150,11 @@ function refreshGame({ force = false } = {}) {
     panel.open({ focus: false });
     startAnalysis({ game: next });
   }
+}
+
+function syncPanelUserColor() {
+  if (manualMode || !pageGame) return;
+  panel?.setGameUserColor?.(pageGame.userColor || null);
 }
 
 function startAnalysis({ game } = {}) {
@@ -173,7 +189,7 @@ function startAnalysis({ game } = {}) {
       payload: {
         pgn: target.pgn,
         settings: settings || {},
-        userColor: target.userColor || null,
+        userColor: panel?.getGameUserColor?.() || target.userColor || null,
         source: target.source,
         sourceLabel: target.sourceLabel,
         url: target.url,
@@ -300,6 +316,7 @@ function handleMessage(message) {
       analyzing = false;
       stopHeartbeat();
       panel.setAnalysis(message.analysis);
+      syncPanelUserColor();
       if (message.analysis?.truncated) {
         panel.showToast('Партия разобрана не полностью: достигнут предел числа полуходов.', 'info');
       }
